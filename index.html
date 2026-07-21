@@ -278,25 +278,26 @@ ul{list-style:none}
 /* Mobile */
 @media(max-width:480px){
   .chat-fab{bottom:1.2rem;right:1rem;width:50px;height:50px;font-size:1.3rem}
-  .chat-window{bottom:0;right:0;left:0;width:100%;max-width:100%;height:100dvh;max-height:100dvh;border-radius:0;box-shadow:none;padding-bottom:env(safe-area-inset-bottom,0)}
+  .chat-window{bottom:1rem;right:1rem;left:auto;width:calc(100vw - 2rem);max-width:340px;height:min(380px,calc(100vh - 10rem));max-height:calc(100vh - 10rem);border-radius:18px;box-shadow:0 16px 48px rgba(74,55,40,.18);padding-bottom:0}
   .scroll-top{bottom:1.2rem;right:1rem}
-  .chat-header{padding:.8rem 1rem;min-height:56px}
-  .chat-avatar{width:34px;height:34px;font-size:.95rem}
-  .chat-header-info h4{font-size:.88rem}
-  .chat-messages{padding:.7rem;gap:.6rem}
-  .chat-msg{max-width:85%;font-size:.82rem;padding:.6rem .8rem;line-height:1.5;word-break:break-word}
-  .chat-input-area{padding:.6rem;padding-bottom:calc(.6rem + env(safe-area-inset-bottom,0));gap:.4rem}
-  .chat-input{font-size:.85rem;padding:.55rem 1rem;min-width:0}
-  .chat-send{width:36px;height:36px;font-size:.95rem}
-  .chat-quick-replies{padding:.2rem .7rem .6rem;gap:.35rem}
-  .chat-qr{font-size:.74rem;padding:.38rem .8rem}
+  .chat-header{padding:.7rem .9rem;min-height:50px}
+  .chat-avatar{width:32px;height:32px;font-size:.9rem}
+  .chat-header-info h4{font-size:.85rem}
+  .chat-messages{padding:.6rem;gap:.5rem}
+  .chat-msg{max-width:85%;font-size:.8rem;padding:.55rem .75rem;line-height:1.5;word-break:break-word}
+  .chat-input-area{padding:.5rem;padding-bottom:calc(.5rem + env(safe-area-inset-bottom,0));gap:.35rem}
+  .chat-input{font-size:.82rem;padding:.5rem .9rem;min-width:0}
+  .chat-send{width:34px;height:34px;font-size:.9rem}
+  .chat-quick-replies{padding:.15rem .6rem .5rem;gap:.3rem}
+  .chat-qr{font-size:.72rem;padding:.35rem .7rem}
 }
 /* Small phones */
 @media(max-width:360px){
-  .chat-msg{max-width:88%;font-size:.78rem;padding:.55rem .7rem}
-  .chat-qr{font-size:.7rem;padding:.32rem .7rem}
-  .chat-input{font-size:.8rem;padding:.5rem .8rem}
-  .chat-header-info h4{font-size:.82rem}
+  .chat-window{width:calc(100vw - 1.6rem);max-width:300px;height:min(340px,calc(100vh - 9rem));border-radius:16px}
+  .chat-msg{max-width:88%;font-size:.76rem;padding:.5rem .65rem}
+  .chat-qr{font-size:.68rem;padding:.3rem .65rem}
+  .chat-input{font-size:.78rem;padding:.45rem .75rem}
+  .chat-header-info h4{font-size:.8rem}
 }
 
 /* ── Preloader ── */
