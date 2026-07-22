@@ -1207,6 +1207,7 @@ const voiceStatus=document.getElementById('voiceStatus');
 const WS_URL=location.hostname==='localhost'||location.hostname==='127.0.0.1'
   ?`ws://${location.hostname}:3001/ws/voice`
   :'wss://chommy-voice-agent.your-subdomain.workers.dev/ws/voice';
+const WS_CONFIGURED=WS_URL&&!WS_URL.includes('your-subdomain');
 const MODEL_ID='gemini-3.1-flash-live-preview';
 let voiceAgent=null;
 
@@ -1216,68 +1217,76 @@ class VoiceAgent{
     this.mediaStream=null;
     this.ws=null;
     this.isListening=false;
-    this.mode='idle'; // idle | listening | speaking
+    this.mode='idle';
     this.speechRecognition=null;
-    this.speechSynthesis=window.speechSynthesis;
     this.useFallback=false;
-    this.audioQueue=[];
     this.init();
   }
 
   async init(){
-    // Set up Web Speech API fallback (works immediately, no backend needed)
-    const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(SpeechRecognition){
-      this.speechRecognition=new SpeechRecognition();
-      this.speechRecognition.continuous=false;
-      this.speechRecognition.interimResults=true;
-      this.speechRecognition.lang='en-US';
-      this.speechRecognition.onresult=e=>{
-        const transcript=Array.from(e.results).map(r=>r[0].transcript).join('');
-        this.showTranscript(transcript);
-        if(e.results[0].isFinal){
-          this.hideOverlay();
-          handleUserInput(transcript);
-        }
-      };
-      this.speechRecognition.onerror=e=>{
-        console.warn('Speech recognition error:',e.error);
-        this.setStatus(this.getErrorMsg(e.error),'error');
-        setTimeout(()=>this.hideOverlay(),2500);
-      };
-      this.speechRecognition.onend=()=>{if(this.isListening)this.hideOverlay();};
-    }
-  }
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){console.warn('[voice] Web Speech API not supported');return;}
+    this.speechRecognition=new SR();
+    this.speechRecognition.continuous=false;
+    this.speechRecognition.interimResults=true;
+    this.speechRecognition.lang='en-US';
+    this.speechRecognition.maxAlternatives=1;
 
-  getErrorMsg(code){
-    const msgs={
-      'no-speech':'No speech detected. Try again.',
-      'audio-capture':'Microphone not found. Check your device.',
-      'not-allowed':'Microphone access denied. Please allow mic access in your browser settings.',
-      'network':'Network error. Check your connection.',
-      'aborted':'Voice input cancelled.',
-      'service-not-allowed':'Speech service not available. Try typing instead.'
+    this.speechRecognition.onresult=e=>{
+      let final='';let interim='';
+      for(let i=0;i<e.results.length;i++){
+        if(e.results[i].isFinal)final+=e.results[i][0].transcript;
+        else interim+=e.results[i][0].transcript;
+      }
+      if(interim)this.showTranscript(interim);
+      if(final){
+        this.showTranscript(final);
+        this.hideOverlay();
+        handleUserInput(final);
+      }
     };
-    return msgs[code]||'Voice input failed. Try typing instead.';
+
+    this.speechRecognition.onerror=e=>{
+      console.warn('[voice] Speech recognition error:',e.error);
+      if(e.error==='no-speech'){
+        this.setStatus('No speech detected. Tap mic to try again.','error');
+        setTimeout(()=>this.hideOverlay(),2000);
+      }else if(e.error==='audio-capture'){
+        this.setStatus('Microphone not found.','error');
+        setTimeout(()=>this.hideOverlay(),2500);
+      }else if(e.error==='not-allowed'||e.error==='service-not-allowed'){
+        this.setStatus('Microphone access denied. Check browser settings.','error');
+        setTimeout(()=>this.hideOverlay(),3000);
+      }else if(e.error!=='aborted'){
+        this.setStatus('Voice input failed. Try typing.','error');
+        setTimeout(()=>this.hideOverlay(),2500);
+      }
+    };
+
+    this.speechRecognition.onend=()=>{
+      if(this.isListening&&this.mode==='idle'){
+        this.hideOverlay();
+      }
+    };
   }
 
   async requestMic(){
-    // Graceful timeout: 10 seconds
     try{
       this.setStatus('Requesting microphone access...');
-      const micPromise=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,sampleRate:16000}});
+      const micPromise=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
       const timeoutPromise=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),10000));
       this.mediaStream=await Promise.race([micPromise,timeoutPromise]);
       return true;
     }catch(err){
+      console.error('[voice] Mic error:',err);
       if(err.message==='timeout'){
-        this.setStatus('Microphone request timed out. Please try again.','error');
+        this.setStatus('Microphone request timed out.','error');
       }else if(err.name==='NotAllowedError'||err.name==='PermissionDeniedError'){
-        this.setStatus('Microphone access denied. Please allow mic access in browser settings.','error');
+        this.setStatus('Microphone access denied. Check browser settings.','error');
       }else if(err.name==='NotFoundError'){
-        this.setStatus('No microphone found. Check your device.','error');
+        this.setStatus('No microphone found on this device.','error');
       }else{
-        this.setStatus('Could not access microphone. Try typing instead.','error');
+        this.setStatus('Could not access microphone.','error');
       }
       return false;
     }
@@ -1285,37 +1294,47 @@ class VoiceAgent{
 
   async initAudioContext(){
     try{
-      this.audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+      if(!this.audioCtx){
+        this.audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+      }
       if(this.audioCtx.state==='suspended')await this.audioCtx.resume();
       return true;
     }catch(e){
+      console.error('[voice] AudioContext error:',e);
       this.setStatus('Audio system unavailable.','error');
       return false;
     }
   }
 
   async connectWebSocket(){
-    return new Promise((resolve,reject)=>{
+    return new Promise((resolve)=>{
+      if(!WS_CONFIGURED){resolve(false);return;}
       try{
-        this.ws=new WebSocket(WS_URL);
-        this.ws.binaryType='arraybuffer';
-        this.ws.onopen=()=>{
-          // Send setup message with model config
-          this.ws.send(JSON.stringify({
-            setup:{
-              model:`models/${MODEL_ID}`,
-              generation_config:{response_modalities:['AUDIO','TEXT']},
-              speech_config:{voice_config:{prebuilt_voice_config:{voice_name:'Aoede'}}}
-            }
-          }));
+        const ws=new WebSocket(WS_URL);
+        ws.binaryType='arraybuffer';
+        let settled=false;
+
+        const timeout=setTimeout(()=>{
+          if(!settled){settled=true;try{ws.close();}catch(e){}resolve(false);}
+        },5000);
+
+        ws.onopen=()=>{
+          if(settled)return;
+          clearTimeout(timeout);settled=true;
+          this.ws=ws;
+          try{
+            ws.send(JSON.stringify({
+              setup:{model:`models/${MODEL_ID}`,generation_config:{response_modalities:['AUDIO','TEXT']},speech_config:{voice_config:{prebuilt_voice_config:{voice_name:'Aoede'}}}}
+            }));
+          }catch(e){}
           resolve(true);
         };
-        this.ws.onmessage=e=>{
+
+        ws.onmessage=e=>{
           try{
             const msg=JSON.parse(typeof e.data==='string'?e.data:'');
             if(msg.serverContent?.modelTurn?.parts){
-              const parts=msg.serverContent.modelTurn.parts;
-              parts.forEach(p=>{
+              msg.serverContent.modelTurn.parts.forEach(p=>{
                 if(p.inlineData)this.playAudioChunk(p.inlineData);
                 if(p.text)this.showTranscript(p.text);
               });
@@ -1323,9 +1342,17 @@ class VoiceAgent{
             if(msg.serverContent?.turnComplete)this.stopSpeaking();
           }catch(parseErr){}
         };
-        this.ws.onerror=()=>{this.useFallback=true;resolve(false);};
-        this.ws.onclose=()=>{if(this.isListening)this.hideOverlay();};
-      }catch(e){this.useFallback=true;resolve(false);}
+
+        ws.onerror=()=>{
+          if(!settled){clearTimeout(timeout);settled=true;}
+          resolve(false);
+        };
+
+        ws.onclose=()=>{
+          if(!settled){clearTimeout(timeout);settled=true;resolve(false);}
+          else if(this.isListening)this.hideOverlay();
+        };
+      }catch(e){resolve(false);}
     });
   }
 
@@ -1334,14 +1361,11 @@ class VoiceAgent{
     const source=this.audioCtx.createMediaStreamSource(this.mediaStream);
     const processor=this.audioCtx.createScriptProcessor(4096,1,1);
     processor.onaudioprocess=e=>{
-      if(!this.isListening)return;
+      if(!this.isListening||!this.ws||this.ws.readyState!==WebSocket.OPEN)return;
       const inputData=e.inputBuffer.getChannelData(0);
-      // Downsample to 16kHz if needed and convert to Int16
       const downsampled=this.downsample(inputData,this.audioCtx.sampleRate,16000);
       const int16=this.float32ToInt16(downsampled);
-      if(this.ws&&this.ws.readyState===WebSocket.OPEN){
-        this.ws.send(int16.buffer);
-      }
+      try{this.ws.send(int16.buffer);}catch(e){}
     };
     source.connect(processor);
     processor.connect(this.audioCtx.destination);
@@ -1353,10 +1377,7 @@ class VoiceAgent{
     const ratio=srcRate/targetRate;
     const newLen=Math.round(buffer.length/ratio);
     const result=new Float32Array(newLen);
-    for(let i=0;i<newLen;i++){
-      const idx=Math.floor(i*ratio);
-      result[i]=buffer[idx]||0;
-    }
+    for(let i=0;i<newLen;i++){result[i]=buffer[Math.floor(i*ratio)]||0;}
     return result;
   }
 
@@ -1386,9 +1407,8 @@ class VoiceAgent{
   }
 
   showTranscript(text){
-    // Remove existing transcript
     const existing=chatVoiceOverlay.querySelector('.chat-voice-transcript');
-    if(existing)existing.remove();
+    if(existing){existing.textContent=text;return;}
     const el=document.createElement('div');
     el.className='chat-voice-transcript';
     el.textContent=text;
@@ -1422,51 +1442,55 @@ class VoiceAgent{
   async toggle(){
     if(this.isListening){this.stop();return;}
     this.showOverlay();
-    this.setStatus('Requesting microphone access...');
     chatMic.classList.add('recording');
+    this.isListening=true;
 
     // Step1: Request mic permission (with 10s timeout)
     const micOk=await this.requestMic();
     if(!micOk){this.hideOverlay();return;}
 
-    // Step2: Initialize and resume AudioContext
+    // Step2: AudioContext
     const audioOk=await this.initAudioContext();
     if(!audioOk){this.hideOverlay();this.releaseMic();return;}
 
-    this.isListening=true;
+    // Step3: Try WebSocket first (if configured)
+    if(WS_CONFIGURED){
+      this.setStatus('Connecting to voice agent...');
+      const wsOk=await this.connectWebSocket();
+      if(wsOk&&this.ws&&this.ws.readyState===WebSocket.OPEN){
+        this.useFallback=false;
+        this.setStatus('Listening...');
+        this.startRecording();
+        return;
+      }
+    }
 
-    // Step3: Try WebSocket (Gemini Live API)
-    this.setStatus('Connecting to voice agent...');
-    const wsOk=await this.connectWebSocket();
-
-    if(wsOk&&this.ws&&this.ws.readyState===WebSocket.OPEN){
-      // WebSocket connected — stream audio
-      this.useFallback=false;
-      this.setStatus('Listening...');
-      this.startRecording();
-    }else{
-      // Fallback: Web Speech API
-      this.useFallback=true;
-      this.setStatus('Listening...');
-      if(this.speechRecognition){
-        try{this.speechRecognition.start();}catch(e){
-          this.setStatus('Voice input unavailable. Try typing.','error');
-          setTimeout(()=>this.hideOverlay(),2500);
-        }
-      }else{
-        this.setStatus('Voice not supported in this browser.','error');
+    // Step4: Fallback to Web Speech API (primary for most users)
+    this.useFallback=true;
+    this.setStatus('Listening...');
+    if(this.speechRecognition){
+      try{
+        this.speechRecognition.start();
+      }catch(e){
+        console.error('[voice] Speech start error:',e);
+        this.setStatus('Voice input unavailable. Try typing.','error');
         setTimeout(()=>this.hideOverlay(),2500);
       }
+    }else{
+      this.setStatus('Voice not supported. Try typing instead.','error');
+      setTimeout(()=>this.hideOverlay(),2500);
     }
   }
 
   stop(){
     this.isListening=false;
     this.mode='idle';
-    if(this._processor){try{this._processor.disconnect();}catch(e){}}
-    if(this._source){try{this._source.disconnect();}catch(e){}}
-    if(this.ws&&this.ws.readyState===WebSocket.OPEN){try{this.ws.close();}catch(e){}}
-    if(this.speechRecognition){try{this.speechRecognition.stop();}catch(e){}}
+    if(this._processor){try{this._processor.disconnect();}catch(e){}this._processor=null;}
+    if(this._source){try{this._source.disconnect();}catch(e){}this._source=null;}
+    if(this.ws&&this.ws.readyState===WebSocket.OPEN){try{this.ws.close();}catch(e){}this.ws=null;}
+    if(this.speechRecognition){
+      try{this.speechRecognition.abort();}catch(e){}
+    }
     this.releaseMic();
     this.hideOverlay();
   }
