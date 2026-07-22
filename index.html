@@ -1204,7 +1204,9 @@ function getBotReply(input){
 const chatMic=document.getElementById('chatMic');
 const chatVoiceOverlay=document.getElementById('chatVoiceOverlay');
 const voiceStatus=document.getElementById('voiceStatus');
-const WS_URL=`ws://${location.hostname}:3001/ws/voice`;
+const WS_URL=location.hostname==='localhost'||location.hostname==='127.0.0.1'
+  ?`ws://${location.hostname}:3001/ws/voice`
+  :'wss://chommy-voice-agent.your-subdomain.workers.dev/ws/voice';
 const MODEL_ID='gemini-3.1-flash-live-preview';
 let voiceAgent=null;
 
