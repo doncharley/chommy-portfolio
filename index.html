@@ -236,7 +236,29 @@ ul{list-style:none}
 .chat-header-info h4{font-family:var(--font-heading);font-size:.95rem;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-header-info p{font-size:.72rem;opacity:.7;font-weight:300;display:flex;align-items:center;gap:.35rem}
 .chat-header-info p .online-dot{width:6px;height:6px;border-radius:50%;background:#7BC67E;display:inline-block;flex-shrink:0}
+.chat-header-actions{display:flex;align-items:center;gap:.2rem}
+.chat-delete{background:none;border:none;color:rgba(250,246,241,.5);font-size:1.1rem;cursor:pointer;padding:.3rem;transition:all .3s cubic-bezier(.34,1.56,.64,1);border-radius:50%}
+.chat-delete:hover{color:var(--rose-blush);transform:scale(1.15)}
 .chat-close{background:none;border:none;color:#FAF6F1;font-size:1.3rem;cursor:pointer;padding:.3rem;transition:transform .3s cubic-bezier(.34,1.56,.64,1);border-radius:50%;flex-shrink:0}
+.chat-close:hover{transform:rotate(90deg) scale(1.1)}
+
+.chat-confirm-overlay{position:fixed;inset:0;background:rgba(61,43,31,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:9998;display:flex;align-items:center;justify-content:center;opacity:0;visibility:hidden;transition:all .3s ease}
+.chat-confirm-overlay.open{opacity:1;visibility:visible}
+.chat-confirm-modal{background:#fff;border-radius:20px;padding:2rem;text-align:center;max-width:320px;width:calc(100vw - 3rem);box-shadow:0 20px 50px rgba(74,55,40,.15);transform:scale(.9);transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+.chat-confirm-overlay.open .chat-confirm-modal{transform:scale(1)}
+.chat-confirm-icon{width:56px;height:56px;border-radius:50%;background:rgba(200,132,122,.12);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;font-size:1.5rem;color:var(--rose-deep)}
+.chat-confirm-modal h4{font-family:var(--font-heading);font-size:1.2rem;color:var(--brown-deep);margin-bottom:.5rem}
+.chat-confirm-modal p{font-size:.88rem;color:var(--brown-mid);line-height:1.6;margin-bottom:1.5rem}
+.chat-confirm-actions{display:flex;gap:.7rem;justify-content:center}
+.chat-confirm-cancel{padding:.6rem 1.5rem;border-radius:50px;border:1.5px solid var(--sand);background:transparent;color:var(--brown-mid);font-family:var(--font-body);font-size:.88rem;font-weight:700;cursor:pointer;transition:all .3s cubic-bezier(.34,1.56,.64,1)}
+.chat-confirm-cancel:hover{background:var(--cream);border-color:var(--brown-light)}
+.chat-confirm-delete{padding:.6rem 1.5rem;border-radius:50px;border:none;background:var(--rose-deep);color:#fff;font-family:var(--font-body);font-size:.88rem;font-weight:700;cursor:pointer;transition:all .3s cubic-bezier(.34,1.56,.64,1)}
+.chat-confirm-delete:hover{background:var(--brown);transform:scale(1.03)}
+
+.chat-msg a{color:var(--rose-deep);text-decoration:underline;text-underline-offset:2px;font-weight:700;transition:color .2s}
+.chat-msg a:hover{color:var(--brown)}
+.chat-msg.bot a{color:var(--rose-deep)}
+.chat-msg.user a{color:var(--rose-blush);text-decoration-color:rgba(232,196,188,.5)}
 
 .chat-messages{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.7rem;scroll-behavior:smooth;min-height:0}
 .chat-messages::-webkit-scrollbar{width:4px}
@@ -706,13 +728,28 @@ ul{list-style:none}
         <p><span class="online-dot"></span> Online now</p>
       </div>
     </div>
-    <button class="chat-close" id="chatClose" aria-label="Close chat"><i class="ri-close-line"></i></button>
+    <div class="chat-header-actions">
+      <button class="chat-delete" id="chatDelete" aria-label="Clear chat"><i class="ri-delete-bin-6-line"></i></button>
+      <button class="chat-close" id="chatClose" aria-label="Close chat"><i class="ri-close-line"></i></button>
+    </div>
   </div>
   <div class="chat-messages" id="chatMessages"></div>
   <div class="chat-quick-replies" id="chatQuickReplies"></div>
   <div class="chat-input-area">
     <input type="text" class="chat-input" id="chatInput" placeholder="Ask me anything..." autocomplete="off">
     <button class="chat-send" id="chatSend" aria-label="Send"><i class="ri-send-plane-2-fill"></i></button>
+  </div>
+</div>
+<!-- Delete Confirmation Modal -->
+<div class="chat-confirm-overlay" id="chatConfirmOverlay">
+  <div class="chat-confirm-modal">
+    <div class="chat-confirm-icon"><i class="ri-delete-bin-6-line"></i></div>
+    <h4>Clear Chat History?</h4>
+    <p>This will permanently delete all messages. This action cannot be undone.</p>
+    <div class="chat-confirm-actions">
+      <button class="chat-confirm-cancel" id="chatConfirmCancel">Cancel</button>
+      <button class="chat-confirm-delete" id="chatConfirmDelete">Clear All</button>
+    </div>
   </div>
 </div>
 
@@ -894,6 +931,10 @@ carouselWrapper.addEventListener('touchend',e=>{
 const chatFab=document.getElementById('chatFab');
 const chatWindow=document.getElementById('chatWindow');
 const chatClose=document.getElementById('chatClose');
+const chatDelete=document.getElementById('chatDelete');
+const chatConfirmOverlay=document.getElementById('chatConfirmOverlay');
+const chatConfirmCancel=document.getElementById('chatConfirmCancel');
+const chatConfirmDeleteBtn=document.getElementById('chatConfirmDelete');
 const chatMessages=document.getElementById('chatMessages');
 const chatQuickReplies=document.getElementById('chatQuickReplies');
 const chatInput=document.getElementById('chatInput');
@@ -902,22 +943,64 @@ const chatBadge=chatFab.querySelector('.chat-fab-badge');
 let chatOpen=false;
 let hasGreeted=false;
 
+// ── IndexedDB ──
+const DB_NAME='chommyChatDB';
+const DB_STORE='messages';
+function openDB(){return new Promise((res,reject)=>{const req=indexedDB.open(DB_NAME,1);req.onupgradeneeded=e=>{e.target.result.createObjectStore(DB_STORE,{keyPath:'id',autoIncrement:true});};req.onsuccess=e=>res(e.target.result);req.onerror=e=>reject(e.target.error);});}
+async function saveMsgsToDB(){
+  try{
+    const db=await openDB();
+    const tx=db.transaction(DB_STORE,'readwrite');
+    const store=tx.objectStore(DB_STORE);
+    store.clear();
+    const msgs=[...chatMessages.querySelectorAll('.chat-msg')].map(m=>({type:m.classList.contains('user')?'user':'bot',html:m.innerHTML}));
+    msgs.forEach(m=>store.add(m));
+  }catch(e){}
+}
+async function loadMsgsFromDB(){
+  try{
+    const db=await openDB();
+    const tx=db.transaction(DB_STORE,'readonly');
+    const store=tx.objectStore(DB_STORE);
+    const req=store.getAll();
+    return new Promise(res=>{req.onsuccess=()=>res(req.result);req.onerror=()=>res([]);});
+  }catch(e){return[];}
+}
+
+// ── Chat open/close ──
 chatFab.addEventListener('click',()=>{
   chatOpen=!chatOpen;
   chatWindow.classList.toggle('open',chatOpen);
   chatBadge.style.display='none';
-  chatFab.innerHTML=chatOpen?'<i class="ri-close-line"></i>':'<i class="ri-sparkling-2-fill"></i><span class="chat-fab-badge" style="display:none"></span>';
-  if(chatOpen&&!hasGreeted){hasGreeted=true;setTimeout(()=>{addBotMsg("Hey there! I'm Chommy's virtual assistant. I can help you with our services, bookings, pricing, or anything else about Chommy's brand.");setTimeout(()=>showQuickReplies(["What services do you offer?","How do I book?","Where are you located?"]),600);},500);}
+  chatFab.innerHTML=chatOpen?'<i class="ri-close-line"></i>':'<i class="ri-sparkling-2-fill"></i>';
+  if(chatOpen&&chatMessages.children.length===0&&!hasGreeted){
+    hasGreeted=true;
+    setTimeout(()=>{addBotMsg("Hey there! I'm Chommy's virtual assistant. I can help with our services, bookings, pricing, or anything about the brand.");setTimeout(()=>showQuickReplies(["What services do you offer?","How do I book?","Where are you located?"]),600);},500);
+  }
   if(chatOpen)chatInput.focus();
 });
 chatClose.addEventListener('click',()=>{chatOpen=false;chatWindow.classList.remove('open');chatFab.innerHTML='<i class="ri-sparkling-2-fill"></i>';});
 
-function addBotMsg(text){
+// ── Delete / Clear chat ──
+chatDelete.addEventListener('click',()=>{if(chatMessages.children.length>0)chatConfirmOverlay.classList.add('open');});
+chatConfirmCancel.addEventListener('click',()=>chatConfirmOverlay.classList.remove('open'));
+chatConfirmOverlay.addEventListener('click',e=>{if(e.target===chatConfirmOverlay)chatConfirmOverlay.classList.remove('open');});
+chatConfirmDeleteBtn.addEventListener('click',async()=>{
+  chatMessages.innerHTML='';
+  chatQuickReplies.innerHTML='';
+  chatConfirmOverlay.classList.remove('open');
+  hasGreeted=false;
+  try{const db=await openDB();const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).clear();}catch(e){}
+  setTimeout(()=>{addBotMsg("Chat cleared! Fresh start. How can I help you today?");setTimeout(()=>showQuickReplies(["What services do you offer?","How do I book?","Tell me about Chommy"]),500);},400);
+});
+
+function addBotMsg(html){
   const el=document.createElement('div');
   el.className='chat-msg bot';
-  el.textContent=text;
+  el.innerHTML=html;
   chatMessages.appendChild(el);
   chatMessages.scrollTop=chatMessages.scrollHeight;
+  saveMsgsToDB();
 }
 function addUserMsg(text){
   const el=document.createElement('div');
@@ -925,6 +1008,7 @@ function addUserMsg(text){
   el.textContent=text;
   chatMessages.appendChild(el);
   chatMessages.scrollTop=chatMessages.scrollHeight;
+  saveMsgsToDB();
 }
 function showTyping(){
   const el=document.createElement('div');
@@ -950,97 +1034,117 @@ function handleUserInput(text){
   addUserMsg(text);
   showTyping();
   const delay=700+Math.random()*600;
-  setTimeout(()=>{hideTyping();const reply=getBotReply(text);addBotMsg(reply.text);if(reply.followups)setTimeout(()=>showQuickReplies(reply.followups),400);},delay);
+  setTimeout(()=>{hideTyping();const reply=getBotReply(text);addBotMsg(reply.text);if(reply.followups&&reply.followups.length)setTimeout(()=>showQuickReplies(reply.followups),400);},delay);
 }
 
 chatSend.addEventListener('click',()=>{const v=chatInput.value.trim();if(v){chatInput.value='';handleUserInput(v);}});
 chatInput.addEventListener('keydown',e=>{if(e.key==='Enter'){const v=chatInput.value.trim();if(v){chatInput.value='';handleUserInput(v);}}});
 
+// ── Load saved messages on init ──
+(async()=>{
+  const saved=await loadMsgsFromDB();
+  if(saved.length>0){
+    hasGreeted=true;
+    saved.forEach(m=>{const el=document.createElement('div');el.className='chat-msg '+(m.type==='user'?'user':'bot');el.innerHTML=m.innerHTML;chatMessages.appendChild(el);});
+    chatMessages.scrollTop=chatMessages.scrollHeight;
+  }
+})();
+
 function getBotReply(input){
   const q=input.toLowerCase();
+  const svc='<a href="#services" target="_blank" rel="noopener">Services</a>';
+  const story='<a href="#story" target="_blank" rel="noopener">My Story</a>';
+  const port='<a href="#portfolio" target="_blank" rel="noopener">Portfolio</a>';
+  const rev='<a href="#reviews" target="_blank" rel="noopener">Reviews</a>';
+  const cta='<a href="#contact" target="_blank" rel="noopener">Contact</a>';
 
   // Greetings
   if(/^(hi|hello|hey|yo|sup|good\s*(morning|afternoon|evening)|howdy|greetings)/i.test(q)){
-    return{text:"Hello! Welcome to Chommy's world. I'm here to help — what can I do for you today?",followups:["What services do you offer?","Tell me about Chommy","How do I book?"]};
+    return{text:"Hey there! Welcome to Chommy's world.",followups:["What services do you offer?","Tell me about Chommy","How do I book?"]};
   }
 
   // Services overview
   if(/service|offer|what do you|help|available/i.test(q)){
-    return{text:"Chommy offers three amazing services:\n\n1. Pedicure & Nail Care — Professional foot care that leaves you feeling pampered.\n2. Food Delivery — Fresh, hot meals delivered to your doorstep on time.\n3. Thrift Fashion — First-grade ladies' clothing at unbeatable prices.\n\nWhich one interests you?",followups:["Tell me about Pedicure","Food Delivery details","Thrift Fashion info"]};
+    return{text:`Chommy offers three services:\n\n1. Pedicure & Nail Care\n2. Food Delivery\n3. Thrift Fashion\n\nExplore them on the ${svc} section.`,followups:["Tell me about Pedicure","Food Delivery details","Thrift Fashion info"]};
   }
 
   // Pedicure
   if(/pedicure|nail|foot|feet|spa|self[\s-]*care/i.test(q)){
-    return{text:"Chommy's Pedicure & Nail Care is all about precision and pampering. Every session is tailored to your comfort — from classic pedicures to creative nail art. Hygiene is top priority, and you'll leave feeling brand new.\n\nWant to book a session?",followups:["How do I book?","Pricing info","What's included?"]};
+    return{text:"Pedicure & Nail Care is all about precision and pampering. From classic pedicures to creative nail art — every session is tailored to you.",followups:["How do I book?","Pricing info","What's included?"]};
   }
 
   // Food delivery
   if(/food|deliver|meal|eat|hungry|lunch|dinner|breakfast|order|menu|cook/i.test(q)){
-    return{text:"Chommy's Food Delivery brings freshly prepared meals right to your door. Whether it's a busy weekday or a relaxed weekend, we've got you covered. Meals are carefully packaged and always delivered on time.\n\nReady to place an order?",followups:["How do I order?","What kind of food?","Delivery areas?"]};
+    return{text:"Food Delivery brings freshly prepared meals to your doorstep. Hot, carefully packaged, and always on time.",followups:["How do I order?","What kind of food?","Delivery areas?"]};
   }
 
   // Thrift fashion
   if(/thrift|cloth|fashion|wear|dress|outfit|style|shop|ladies|women|lady/i.test(q)){
-    return{text:"Chommy's Thrift Fashion is a treasure trove of first-grade ladies' clothing. Every piece is handpicked for quality and style — designer finds at fraction of retail prices. Fashion-forward and budget-friendly.\n\nWant to see the latest collection?",followups:["How do I shop?","What brands?","Sizes available?"]};
+    return{text:"Thrift Fashion is a treasure trove of first-grade ladies' clothing. Designer finds at unbeatable prices — handpicked for quality and style.",followups:["How do I shop?","What brands?","Sizes available?"]};
   }
 
   // Booking
   if(/book|appointment|schedule|reserve|when|time|available/i.test(q)){
-    return{text:"Booking with Chommy is easy! Simply send a DM on X (Twitter) or WhatsApp with your preferred service, date, and time. We'll confirm your spot right away.\n\nYou can also reach out via the contact section on this website.",followups:["Contact details","Social media links","Pricing info"]};
+    return{text:`Booking is easy! DM Chommy on X or WhatsApp with your preferred service, date, and time.\n\nYou can also reach out via the ${cta} section.`,followups:["Contact details","Social media links","Pricing info"]};
   }
 
   // Pricing
   if(/price|cost|how much|charge|rate|affordable|budget|expensive|cheap|fee/i.test(q)){
-    return{text:"Chommy believes in value for money across all services. Prices vary by service and package, but everything is priced to be fair and accessible.\n\nFor exact pricing, DM Chommy on X or WhatsApp — you'll get a quick response!",followups:["Contact Chommy","What services do you offer?","Where are you located?"]};
+    return{text:"Everything is priced to be fair and accessible. For exact pricing, DM Chommy on X or WhatsApp — you'll get a quick response!",followups:["Contact Chommy","What services do you offer?","Where are you located?"]};
   }
 
   // Location
   if(/where|location|address|area|place|lagos|nigeria|visit|find you/i.test(q)){
-    return{text:"Chommy is based in Lagos, Nigeria, and serves customers across the city. For food delivery and thrift fashion, we reach multiple areas. For pedicure services, sessions are arranged at convenient locations.\n\nDM for exact details!",followups:["How do I book?","Contact details","Social media links"]};
+    return{text:"Chommy is based in Lagos, Nigeria. We serve customers across the city — food delivery, thrift fashion, and pedicure sessions at convenient locations.",followups:["How do I book?","Contact details","Social media links"]};
   }
 
   // About / story
   if(/about|story|journey|who are you|tell me about chommy|brand|background|start/i.test(q)){
-    return{text:"Chommy is a serial entrepreneur on a beautiful adventure. What started as doing pedicures for friends turned into three thriving ventures — self-care, food delivery, and fashion. The mission? Make everyday life a little more beautiful and a lot more convenient.\n\nWant to know more?",followups:["What services do you offer?","Contact details","Social media links"]};
+    return{text:`Chommy is a serial entrepreneur on a beautiful adventure. What started as pedicures for friends turned into three thriving ventures.\n\nRead the full story in the ${story} section.`,followups:["What services do you offer?","Contact details","Social media links"]};
   }
 
   // Contact / social
   if(/contact|reach|phone|email|social|twitter|youtube|instagram|whatsapp|dm|x\.com|tiktok/i.test(q)){
-    return{text:"You can reach Chommy through:\n\nX (Twitter): DM @doncharley\nYouTube: Chommy's channel\nInstagram: @chommy\nWhatsApp: +234 XXX XXX XXXX\nEmail: hello@chommy.com\n\nOr scroll down to the Contact section on this page!",followups:["What services do you offer?","How do I book?","Where are you located?"]};
+    return{text:`You can reach Chommy through:\n\nX (Twitter): DM @doncharley\nYouTube: Chommy's channel\nWhatsApp: +234 XXX XXX XXXX\nEmail: hello@chommy.com\n\nOr visit the ${cta} section below.`,followups:["What services do you offer?","How do I book?","Where are you located?"]};
   }
 
   // Rating / reviews
   if(/review|rating|testimonial|feedback|star|great|amazing|love|best/i.test(q)){
-    return{text:"Chommy has a perfect 5-star rating from happy clients! Here's what some say:\n\n'I walked in tired and walked out feeling like a new woman.' — Adaeze N.\n\n'Chommy's food delivery has become a weekly ritual for my family.' — Kemi O.\n\nWant to leave a review? Just DM on X!",followups:["What services do you offer?","How do I book?"]};
+    return{text:`Chommy has a perfect 5-star rating! Here's what clients say:\n\n"I walked in tired and walked out feeling brand new." — Adaeze\n\n"Chommy's food delivery is a weekly ritual for us." — Kemi\n\nSee more in the ${rev} section.`,followups:["What services do you offer?","How do I book?"]};
   }
 
-  // Order / food specifics
+  // Food specifics
   if(/kind of food|what food|type|cuisine|vegetarian|special/i.test(q)){
-    return{text:"Chommy's food delivery covers a wide variety — from local Nigerian favorites to continental dishes. Whether you're craving jollof rice, pasta, grilled chicken, or a healthy salad, we've got options.\n\nSpecial dietary needs? Just let us know when ordering!",followups:["How do I order?","Delivery areas?","Contact details"]};
+    return{text:"From local Nigerian favorites to continental dishes — jollof, pasta, grilled chicken, salads, and more. Special dietary needs? Just let us know!",followups:["How do I order?","Delivery areas?","Contact details"]};
   }
 
   // Brands / sizes
   if(/brand|size|designer|quality|original/i.test(q)){
-    return{text:"Chommy curates first-grade thrift pieces — think Zara, H&M, Mango, and other premium brands at a fraction of the cost. Sizes range from small to extra-large, with new arrivals every week.\n\nFollow on Instagram for the latest drops!",followups:["How do I shop?","What services do you offer?","Social media links"]};
+    return{text:"Think Zara, H&M, Mango, and other premium brands at a fraction of the cost. Sizes range from small to extra-large, with new arrivals weekly.",followups:["How do I shop?","What services do you offer?","Social media links"]};
   }
 
-  // What's included pedicure
+  // What's included
   if(/included|include|package|what do i get|experience/i.test(q)){
-    return{text:"A typical Chommy pedicure session includes:\n\n• Foot soak & exfoliation\n• Nail shaping & cuticle care\n• Moisturizing treatment\n• Polish application (classic or gel)\n• Relaxing foot massage\n\nPremium add-ons like nail art and paraffin treatments are also available!",followups:["How do I book?","Pricing info","Other services"]};
+    return{text:"A typical session includes:\n\n• Foot soak & exfoliation\n• Nail shaping & cuticle care\n• Moisturizing treatment\n• Polish application\n• Relaxing foot massage\n\nPremium add-ons like nail art are also available!",followups:["How do I book?","Pricing info","Other services"]};
+  }
+
+  // Portfolio
+  if(/portfolio|gallery|work|showcase|pics|photos/i.test(q)){
+    return{text:`Check out the ${port} section to see Chommy's work — pedicure sessions, food delivery, and curated fashion finds.`,followups:["What services do you offer?","How do I book?"]};
   }
 
   // Thanks
   if(/thank|thanks|thx|appreciate|helpful|awesome|great/i.test(q)){
-    return{text:"You're welcome! It's always a pleasure helping out. Is there anything else you'd like to know about Chommy's services?",followups:["What services do you offer?","How do I book?","Contact details"]};
+    return{text:"You're welcome! Happy to help. Anything else you'd like to know?",followups:["What services do you offer?","How do I book?","Contact details"]};
   }
 
   // Bye
   if(/bye|goodbye|see you|later|cya|take care/i.test(q)){
-    return{text:"Bye for now! Remember, Chommy's always here when you need great self-care, delicious food, or stylish finds. Take care!",followups:[]};
+    return{text:"Thank you so much for your time — it truly means a lot. I hope Chommy's services bring you joy whenever you need them. Until next time, take care and stay amazing!",followups:[]};
   }
 
-  // Default fallback
-  return{text:"That's a great question! I'm best at answering about Chommy's services, bookings, pricing, and contact info. Could you try asking about one of those?",followups:["What services do you offer?","How do I book?","Pricing info","Contact details"]};
+  // Default
+  return{text:"I'm best at answering about Chommy's services, bookings, pricing, and contact info. Could you try one of those?",followups:["What services do you offer?","How do I book?","Pricing info","Contact details"]};
 }
 </script>
 </body>
