@@ -1311,29 +1311,32 @@ class VoiceAgent{
     return new Promise((resolve)=>{
       if(!WS_CONFIGURED){resolve(false);return;}
       try{
+        console.log('[voice] Connecting to:',WS_URL);
         const ws=new WebSocket(WS_URL);
         ws.binaryType='arraybuffer';
         let settled=false;
 
         const timeout=setTimeout(()=>{
-          if(!settled){settled=true;try{ws.close();}catch(e){}resolve(false);}
-        },5000);
+          if(!settled){settled=true;console.warn('[voice] WS connection timeout');try{ws.close();}catch(e){}resolve(false);}
+        },8000);
 
         ws.onopen=()=>{
           if(settled)return;
           clearTimeout(timeout);settled=true;
+          console.log('[voice] WebSocket connected');
           this.ws=ws;
           try{
             ws.send(JSON.stringify({
               setup:{model:`models/${MODEL_ID}`,generation_config:{response_modalities:['AUDIO','TEXT']},speech_config:{voice_config:{prebuilt_voice_config:{voice_name:'Aoede'}}}}
             }));
-          }catch(e){}
+          }catch(e){console.error('[voice] Setup send error:',e);}
           resolve(true);
         };
 
         ws.onmessage=e=>{
           try{
             const msg=JSON.parse(typeof e.data==='string'?e.data:'');
+            if(msg.type==='error'){console.error('[voice] Server error:',msg.error);this.setStatus(msg.error,'error');setTimeout(()=>this.hideOverlay(),3000);return;}
             if(msg.serverContent?.modelTurn?.parts){
               msg.serverContent.modelTurn.parts.forEach(p=>{
                 if(p.inlineData)this.playAudioChunk(p.inlineData);
@@ -1344,16 +1347,18 @@ class VoiceAgent{
           }catch(parseErr){}
         };
 
-        ws.onerror=()=>{
+        ws.onerror=(e)=>{
+          console.error('[voice] WebSocket error:',e);
           if(!settled){clearTimeout(timeout);settled=true;}
           resolve(false);
         };
 
-        ws.onclose=()=>{
+        ws.onclose=(e)=>{
+          console.log('[voice] WebSocket closed:',e.code,e.reason);
           if(!settled){clearTimeout(timeout);settled=true;resolve(false);}
           else if(this.isListening)this.hideOverlay();
         };
-      }catch(e){resolve(false);}
+      }catch(e){console.error('[voice] WS exception:',e);resolve(false);}
     });
   }
 
